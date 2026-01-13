@@ -61,7 +61,7 @@ start_container_once() {
     ${USERNS_FLAG} \
     --restart "${RESTART_POLICY}" \
     -e HOME="${USER_HOME}" \
-    -v "${USER_HOME}:${USER_HOME}" \
+    -v "${USER_HOME}:${USER_HOME}:Z" \
     -p "${GUI_PORT}:${GUI_PORT}" \
     -p "${SYNC_TCP_PORT}:${SYNC_TCP_PORT}/tcp" \
     -p "${SYNC_UDP_PORT}:${SYNC_UDP_PORT}/udp" \
