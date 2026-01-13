@@ -177,6 +177,24 @@ cmd_redeploy() {
   cmd_install
 }
 
+cmd_uninstall() {
+  log "Desinstalação solicitada..."
+  
+  cmd_stop
+  remove_service_if_exists
+  
+  # Clean up systemd
+  systemctl --user daemon-reload
+  
+  # Remove container (cmd_stop does validation, but we force remove here just in case)
+  remove_container_if_exists
+
+  log "Desinstalação concluída."
+  warn "NOTA: Seus dados EM DISCO não foram removidos."
+  warn "Diretório de dados: ${DATA_DIR}"
+  warn "Para remover totalmente: rm -rf \"${DATA_DIR}\""
+}
+
 ############################################
 # MAIN
 ############################################
@@ -188,6 +206,7 @@ Uso:
   $0 update    Atualiza a imagem e reinicia o serviço
   $0 stop      Para o serviço e o container
   $0 redeploy  Remove e recria o container (reinstala)
+  $0 uninstall Remove o serviço e o container (mantém dados)
 
 Configurações:
   Ajuste as variáveis no topo do arquivo.
@@ -199,5 +218,6 @@ case "${1:-}" in
   update)   cmd_update  ;;
   stop)     cmd_stop    ;;
   redeploy) cmd_redeploy ;;
+  uninstall) cmd_uninstall ;;
   *)       usage; exit 1 ;;
 esac
