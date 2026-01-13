@@ -60,6 +60,7 @@ start_container_once() {
     --name "${CONTAINER_NAME}" \
     ${USERNS_FLAG} \
     --restart "${RESTART_POLICY}" \
+    --security-opt label=disable \
     -e HOME="${USER_HOME}" \
     -v "${USER_HOME}:${USER_HOME}:Z" \
     -p "${GUI_PORT}:${GUI_PORT}" \
