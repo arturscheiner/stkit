@@ -19,8 +19,8 @@ SYNC_TCP_PORT="22000"
 SYNC_UDP_PORT="22000"
 DISCOVERY_UDP_PORT="21027"
 
-# HOME compartilhado (Distrobox-like)
-USER_HOME="${HOME}"
+# Diretório de dados persistente no host
+DATA_DIR="${HOME}/.local/share/syncthing"
 
 # Diretório systemd --user
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
@@ -61,8 +61,8 @@ start_container_once() {
     ${USERNS_FLAG} \
     --restart "${RESTART_POLICY}" \
     --security-opt label=disable \
-    -e HOME="${USER_HOME}" \
-    -v "${USER_HOME}:${USER_HOME}" \
+    -e STDATADIR=/var/syncthing \
+    -v "${DATA_DIR}:/var/syncthing" \
     -p "${GUI_PORT}:${GUI_PORT}" \
     -p "${SYNC_TCP_PORT}:${SYNC_TCP_PORT}/tcp" \
     -p "${SYNC_UDP_PORT}:${SYNC_UDP_PORT}/udp" \
@@ -106,13 +106,9 @@ print_post_install_notes() {
 🌐 GUI:
    http://localhost:${GUI_PORT}
 
-🏠 HOME do Syncthing:
-   ${USER_HOME}  (igual ao usuário Linux)
-
-📁 Exemplos de pastas na GUI:
-   ~/sync
-   ~/backup
-   ~/projects
+📁 Dados persistentes:
+   ${DATA_DIR}
+   (Mapeado para /var/syncthing no container)
 
 ⚠️ RECOMENDAÇÕES DE SEGURANÇA:
    Configure IGNORE PATTERNS:
@@ -135,6 +131,7 @@ EOF
 
 cmd_install() {
   ensure_prereqs
+  mkdir -p "${DATA_DIR}"
   log "Instalação iniciada..."
 
   remove_service_if_exists
