@@ -19,15 +19,13 @@ SYNC_TCP_PORT="22000"
 SYNC_UDP_PORT="22000"
 DISCOVERY_UDP_PORT="21027"
 
-# Diretório de dados persistente no host
-DATA_DIR="${HOME}/.local/share/syncthing"
+# Diretórios persistentes
+BASE_DIR="${HOME}/.local/share/syncthing"
+CONFIG_DIR="${BASE_DIR}/config"
+STATE_DIR="${BASE_DIR}/state"
 
 # Diretório systemd --user
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
-
-# Flags de runtime
-USERNS_FLAG="--userns=keep-id"
-RESTART_POLICY="unless-stopped"
 
 ############################################
 # FUNÇÕES UTILITÁRIAS
@@ -47,45 +45,61 @@ ensure_prereqs() {
 }
 
 remove_container_if_exists() {
-  podman rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  if podman ps -a --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+      log "Removendo container antigo (${CONTAINER_NAME})..."
+      podman rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  fi
 }
 
 remove_service_if_exists() {
-  rm -f "${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
+  if [ -f "${SYSTEMD_USER_DIR}/${SERVICE_NAME}" ]; then
+      log "Removendo arquivo de serviço (${SERVICE_NAME})..."
+      systemctl --user stop "${SERVICE_NAME}" 2>/dev/null || true
+      rm -f "${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
+  fi
 }
 
-start_container_once() {
-  log "Subindo container (${CONTAINER_NAME}) em modo HOME compartilhado..."
-  podman run -d \
-    --name "${CONTAINER_NAME}" \
-    ${USERNS_FLAG} \
-    --restart "${RESTART_POLICY}" \
-    --security-opt label=disable \
-    -e HOME=/var/syncthing \
-    -v "${DATA_DIR}:/var/syncthing" \
-    -p "${GUI_PORT}:${GUI_PORT}" \
-    -p "${SYNC_TCP_PORT}:${SYNC_TCP_PORT}/tcp" \
-    -p "${SYNC_UDP_PORT}:${SYNC_UDP_PORT}/udp" \
-    -p "${DISCOVERY_UDP_PORT}:${DISCOVERY_UDP_PORT}/udp" \
-    "${IMAGE}"
-}
-
-generate_systemd_unit() {
-  log "Gerando unit systemd --user a partir do container..."
-  podman generate systemd \
-    --name "${CONTAINER_NAME}" \
-    --files \
-    --new
-
+install_service_file() {
+  log "Criando arquivo de serviço systemd em ${SYSTEMD_USER_DIR}/${SERVICE_NAME}..."
+  
   mkdir -p "${SYSTEMD_USER_DIR}"
-  mv "container-${CONTAINER_NAME}.service" "${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
-}
 
-enable_and_start_service() {
-  log "Habilitando e iniciando serviço systemd --user..."
-  systemctl --user daemon-reexec
-  systemctl --user daemon-reload
-  systemctl --user enable --now "${SERVICE_NAME}"
+  # Note: ExecStart explicitly calls podman run
+  cat <<EOF > "${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
+[Unit]
+Description=Syncthing (Podman, explicit config/data)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Restart=always
+TimeoutStopSec=60
+Environment=PODMAN_SYSTEMD_UNIT=%n
+
+ExecStart=/usr/bin/podman run \\
+  --name ${CONTAINER_NAME} \\
+  --replace \\
+  --userns=keep-id \\
+  --security-opt label=disable \\
+  -v %h/.local/share/syncthing/config:/config \\
+  -v %h/.local/share/syncthing/state:/state \\
+  -v %h:/data \\
+  -p ${GUI_PORT}:8384 \\
+  -p ${SYNC_TCP_PORT}:22000/tcp \\
+  -p ${SYNC_UDP_PORT}:22000/udp \\
+  -p ${DISCOVERY_UDP_PORT}:21027/udp \\
+  ${IMAGE} \\
+  syncthing \\
+    --config=/config \\
+    --data=/state \\
+    --gui-address=0.0.0.0:8384
+
+ExecStop=/usr/bin/podman stop -t 10 ${CONTAINER_NAME}
+ExecStopPost=/usr/bin/podman rm -f ${CONTAINER_NAME}
+
+[Install]
+WantedBy=default.target
+EOF
 }
 
 check_linger() {
@@ -101,26 +115,20 @@ check_linger() {
 print_post_install_notes() {
   cat <<EOF
 
-✅ Syncthing instalado como serviço (systemd --user)
+✅ Syncthing configurado e iniciado!
 
 🌐 GUI:
    http://localhost:${GUI_PORT}
 
-📁 Dados persistentes:
-   ${DATA_DIR}
-   (Mapeado para /var/syncthing no container)
+📁 Estrutura de Pastas:
+   Config: ${CONFIG_DIR}
+   State:  ${STATE_DIR}
+   Data:   ${HOME} (Mapeado para /data no Syncthing)
 
-⚠️ RECOMENDAÇÕES DE SEGURANÇA:
-   Configure IGNORE PATTERNS:
-     .cache/
-     .local/share/Trash/
-     .ssh/
-     .gnupg/
-     *.sock
-     *.lock
-
-🔁 Atualizar:
-   ./syncthing update
+⚠️ NOTA:
+   O Syncthing verá seu HOME em /data.
+   Na GUI do Syncthing, ao adicionar pastas, use caminhos iniciando com /data/
+   Exemplo: /data/Documents
 
 EOF
 }
@@ -131,24 +139,21 @@ EOF
 
 cmd_install() {
   ensure_prereqs
-  mkdir -p "${DATA_DIR}"
-  log "Instalação iniciada..."
-
-  remove_service_if_exists
-  remove_container_if_exists
-  start_container_once
   
-  # Verify if container is running
-  sleep 2
-  if ! podman ps -q --filter "name=${CONTAINER_NAME}" | grep -q .; then
-     err "Container falhou ao iniciar!"
-     log "Logs do container:"
-     podman logs "${CONTAINER_NAME}"
-     exit 1
-  fi
+  log "Preparando diretórios..."
+  mkdir -p "${CONFIG_DIR}"
+  mkdir -p "${STATE_DIR}"
+  
+  # Remove old artifacts to avoid conflict
+  remove_service_if_exists
+  remove_container_if_exists # Clean up valid/invalid previous containers
 
-  generate_systemd_unit
-  enable_and_start_service
+  install_service_file
+  
+  log "Habilitando serviço..."
+  systemctl --user daemon-reload
+  systemctl --user enable --now "${SERVICE_NAME}"
+  
   check_linger
   print_post_install_notes
 }
@@ -156,26 +161,30 @@ cmd_install() {
 cmd_update() {
   ensure_prereqs
   log "Atualizando imagem ${IMAGE}..."
-
   podman pull "${IMAGE}"
-
-  if systemctl --user is-enabled "${SERVICE_NAME}" >/dev/null 2>&1; then
-    log "Reiniciando serviço ${SERVICE_NAME}..."
-    systemctl --user restart "${SERVICE_NAME}"
-  else
-    warn "Serviço ${SERVICE_NAME} não está habilitado. Nada para reiniciar."
-  fi
-
+  
+  log "Reiniciando serviço para aplicar nova imagem..."
+  systemctl --user restart "${SERVICE_NAME}"
   log "Update concluído."
+}
+
+cmd_start() {
+    log "Iniciando serviço ${SERVICE_NAME}..."
+    systemctl --user start "${SERVICE_NAME}"
+    log "Comando start enviado."
+    cmd_check
 }
 
 cmd_stop() {
   log "Parando serviço ${SERVICE_NAME}..."
-  systemctl --user stop "${SERVICE_NAME}"
+  systemctl --user stop "${SERVICE_NAME}" >/dev/null 2>&1 || true
   
-  # Ensure container is stopped if running outside service or stuck
+  # Wait a bit
+  sleep 2
+  
+  # Force stop if still running (though ExecStop should handle it)
   if podman ps -q --filter "name=${CONTAINER_NAME}" | grep -q .; then
-     log "Parando container ${CONTAINER_NAME} (cleanup)..."
+     log "Container ainda rodando, forçando stop..."
      podman stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   fi
   
@@ -183,15 +192,45 @@ cmd_stop() {
 }
 
 cmd_redeploy() {
-  log "Redeploy solicitado. Reiniciando todo o processo de instalação..."
-  cmd_install
+    log "Redeploy (reinstall) solicitado..."
+    cmd_install
 }
 
-cmd_start() {
-  log "Iniciando serviço ${SERVICE_NAME}..."
-  systemctl --user start "${SERVICE_NAME}"
-  log "Comando start enviado."
-  cmd_check
+cmd_uninstall() {
+    log "Desinstalação solicitada..."
+    cmd_stop
+    remove_service_if_exists
+    
+    # ExecStopPost usually removes it, but ensure it's gone
+    podman rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+    systemctl --user daemon-reload
+    
+    log "Desinstalação concluída."
+    warn "Os dados de configuração permanecem em: ${BASE_DIR}"
+}
+
+cmd_destroy() {
+  echo -e "\033[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\033[0m"
+  echo -e "\033[0;31m                      CUIDADO !!!                           \033[0m"
+  echo -e "\033[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\033[0m"
+  echo -e "\033[0;31mEste comando irá REMOVER O SERVIÇO, CONTAINER E AS\033[0m"
+  echo -e "\033[0;31mCONFIGURAÇÕES/DB EM ${BASE_DIR}\033[0m"
+  echo -e "\033[0;31m(Seus arquivos pessoais no HOME não serão tocados)\033[0m"
+  echo ""
+  read -p "Tem certeza absoluta? (y/N) " -n 1 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    log "Aborted."
+    exit 1
+  fi
+  
+  cmd_uninstall
+  
+  if [ -d "${BASE_DIR}" ]; then
+    log "Removendo diretório de config/state: ${BASE_DIR}"
+    rm -rf "${BASE_DIR}"
+    log "Removido."
+  fi
 }
 
 cmd_check() {
@@ -205,55 +244,11 @@ cmd_check() {
   podman ps --filter "name=${CONTAINER_NAME}" --format "table {{.ID}} {{.Image}} {{.Status}} {{.Ports}}"
   
   echo ""
-  echo "--- Dados ---"
-  if [ -d "${DATA_DIR}" ]; then
-     log "Diretório de dados existe: ${DATA_DIR}"
-  else
-     warn "Diretório de dados NÃO encontrado: ${DATA_DIR}"
-  fi
+  echo "--- Diretórios ---"
+  if [ -d "${CONFIG_DIR}" ]; then echo "Config: OK (${CONFIG_DIR})"; else echo "Config: MISSING"; fi
+  if [ -d "${STATE_DIR}" ]; then echo "State:  OK (${STATE_DIR})"; else echo "State:  MISSING"; fi
 }
 
-cmd_uninstall() {
-  log "Desinstalação solicitada..."
-  
-  cmd_stop
-  remove_service_if_exists
-  
-  # Clean up systemd
-  systemctl --user daemon-reload
-  
-  # Remove container (cmd_stop does validation, but we force remove here just in case)
-  remove_container_if_exists
-
-  log "Desinstalação concluída."
-  warn "NOTA: Seus dados EM DISCO não foram removidos."
-  warn "Diretório de dados: ${DATA_DIR}"
-  warn "Para remover totalmente: rm -rf \"${DATA_DIR}\""
-}
-
-cmd_destroy() {
-  echo -e "\033[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\033[0m"
-  echo -e "\033[0;31m                      CUIDADO !!!                           \033[0m"
-  echo -e "\033[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\033[0m"
-  echo -e "\033[0;31mEste comando irá REMOVER O CONTAINER E APAGAR TODOS OS DADOS\033[0m"
-  echo -e "\033[0;31mEM ${DATA_DIR}\033[0m"
-  echo -e "\033[0;31mISSO NÃO PODE SER DESFEITO.\033[0m"
-  echo ""
-  read -p "Tem certeza absoluta que deseja destruir tudo? (y/N) " -n 1 -r
-  echo ""
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    log "Aborted."
-    exit 1
-  fi
-  
-  cmd_uninstall
-  
-  if [ -d "${DATA_DIR}" ]; then
-    log "Removendo dados persistentes em ${DATA_DIR}..."
-    rm -rf "${DATA_DIR}"
-    log "Dados removidos."
-  fi
-}
 
 ############################################
 # MAIN
@@ -262,28 +257,27 @@ cmd_destroy() {
 usage() {
   cat <<EOF
 Uso:
-  $0 install   Instala Syncthing como serviço systemd --user
-  $0 update    Atualiza a imagem e reinicia o serviço
-  $0 stop      Para o serviço e o container
-  $0 redeploy  Remove e recria o container (reinstala)
-  $0 uninstall Remove o serviço e o container (mantém dados)
-  $0 start     Inicia o serviço (caso esteja parado)
-  $0 check     Verifica status do serviço e container
-  $0 destroy   DESTROÍ TUDO (remove container e DADOS)
+  $0 install   Instala Syncthing (cria unit systemd e diretórios)
+  $0 update    Atualiza imagem e reinicia
+  $0 start     Inicia o serviço
+  $0 stop      Para o serviço
+  $0 restart   Reinicia o serviço
+  $0 status/check Verifica status
+  $0 destroy   Remove TUDO (inclusive configs)
+  $0 uninstall Remove serviço/container (mantém configs)
 
-Configurações:
-  Ajuste as variáveis no topo do arquivo.
 EOF
 }
 
 case "${1:-}" in
-  install)  cmd_install ;;
-  update)   cmd_update  ;;
-  stop)     cmd_stop    ;;
-  redeploy) cmd_redeploy ;;
-  uninstall) cmd_uninstall ;;
-  start)    cmd_start    ;;
-  check)    cmd_check    ;;
-  destroy)  cmd_destroy  ;;
-  *)       usage; exit 1 ;;
+  install)       cmd_install ;;
+  update)        cmd_update  ;;
+  start)         cmd_start   ;;
+  stop)          cmd_stop    ;;
+  restart)       systemctl --user restart "${SERVICE_NAME}"; cmd_check ;;
+  check|status)  cmd_check   ;;
+  destroy)       cmd_destroy ;;
+  uninstall)     cmd_uninstall ;;
+  redeploy)      cmd_install ;; # alias
+  *)             usage; exit 1 ;;
 esac
