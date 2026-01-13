@@ -81,7 +81,7 @@ ExecStart=/usr/bin/podman run \\
   --replace \\
   --userns=keep-id \\
   --security-opt label=disable \\
-  --unsetenv STHOME \\
+  --unsetenv STHOMEDIR \\
   -v %h/.local/share/syncthing/config:/config \\
   -v %h/.local/share/syncthing/state:/state \\
   -v %h:/data \\
