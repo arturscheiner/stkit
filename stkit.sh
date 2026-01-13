@@ -187,6 +187,32 @@ cmd_redeploy() {
   cmd_install
 }
 
+cmd_start() {
+  log "Iniciando serviço ${SERVICE_NAME}..."
+  systemctl --user start "${SERVICE_NAME}"
+  log "Comando start enviado."
+  cmd_check
+}
+
+cmd_check() {
+  log "Verificando status..."
+  
+  echo "--- Systemd Service ---"
+  systemctl --user status "${SERVICE_NAME}" --no-pager || echo "Serviço não está rodando."
+  
+  echo ""
+  echo "--- Container ---"
+  podman ps --filter "name=${CONTAINER_NAME}" --format "table {{.ID}} {{.Image}} {{.Status}} {{.Ports}}"
+  
+  echo ""
+  echo "--- Dados ---"
+  if [ -d "${DATA_DIR}" ]; then
+     log "Diretório de dados existe: ${DATA_DIR}"
+  else
+     warn "Diretório de dados NÃO encontrado: ${DATA_DIR}"
+  fi
+}
+
 cmd_uninstall() {
   log "Desinstalação solicitada..."
   
@@ -205,6 +231,30 @@ cmd_uninstall() {
   warn "Para remover totalmente: rm -rf \"${DATA_DIR}\""
 }
 
+cmd_destroy() {
+  echo -e "\033[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\033[0m"
+  echo -e "\033[0;31m                      CUIDADO !!!                           \033[0m"
+  echo -e "\033[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\033[0m"
+  echo -e "\033[0;31mEste comando irá REMOVER O CONTAINER E APAGAR TODOS OS DADOS\033[0m"
+  echo -e "\033[0;31mEM ${DATA_DIR}\033[0m"
+  echo -e "\033[0;31mISSO NÃO PODE SER DESFEITO.\033[0m"
+  echo ""
+  read -p "Tem certeza absoluta que deseja destruir tudo? (y/N) " -n 1 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    log "Aborted."
+    exit 1
+  fi
+  
+  cmd_uninstall
+  
+  if [ -d "${DATA_DIR}" ]; then
+    log "Removendo dados persistentes em ${DATA_DIR}..."
+    rm -rf "${DATA_DIR}"
+    log "Dados removidos."
+  fi
+}
+
 ############################################
 # MAIN
 ############################################
@@ -217,6 +267,9 @@ Uso:
   $0 stop      Para o serviço e o container
   $0 redeploy  Remove e recria o container (reinstala)
   $0 uninstall Remove o serviço e o container (mantém dados)
+  $0 start     Inicia o serviço (caso esteja parado)
+  $0 check     Verifica status do serviço e container
+  $0 destroy   DESTROÍ TUDO (remove container e DADOS)
 
 Configurações:
   Ajuste as variáveis no topo do arquivo.
@@ -229,5 +282,8 @@ case "${1:-}" in
   stop)     cmd_stop    ;;
   redeploy) cmd_redeploy ;;
   uninstall) cmd_uninstall ;;
+  start)    cmd_start    ;;
+  check)    cmd_check    ;;
+  destroy)  cmd_destroy  ;;
   *)       usage; exit 1 ;;
 esac
