@@ -27,6 +27,13 @@ STATE_DIR="${BASE_DIR}/state"
 # Systemd User Directory
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
 ############################################
 # UTILITY FUNCTIONS
 ############################################
@@ -253,45 +260,63 @@ cmd_destroy() {
 }
 
 cmd_check() {
-  log "Checking status..."
+  echo -e "${BLUE}=== Health Check ===${NC}"
   
-  echo "--- Systemd Service ---"
-  check_linger
-  systemctl --user status "${SERVICE_NAME}" --no-pager || echo "Service is not running."
-  
-  echo ""
-  echo "--- Container ---"
-  podman ps --filter "name=${CONTAINER_NAME}" --format "table {{.ID}} {{.Image}} {{.Status}} {{.Ports}}"
-  
-  echo ""
-  echo "--- Directories ---"
-  if [ -d "${CONFIG_DIR}" ]; then echo "Config: OK (${CONFIG_DIR})"; else echo "Config: MISSING"; fi
-  if [ -d "${STATE_DIR}" ]; then echo "State:  OK (${STATE_DIR})"; else echo "State:  MISSING"; fi
-
-  echo ""
-  echo "--- Configured Folders ---"
-  local config_file="${CONFIG_DIR}/config.xml"
-  if [ -f "${config_file}" ]; then
-      grep "<folder " "${config_file}" | while read -r line; do
-          # Extract attributes using regex
-          id=$(echo "$line" | grep -o 'id="[^"]*"' | cut -d'"' -f2)
-          label=$(echo "$line" | grep -o 'label="[^"]*"' | cut -d'"' -f2)
-          path=$(echo "$line" | grep -o 'path="[^"]*"' | cut -d'"' -f2)
-          
-          # Map /data back to $HOME
-          # We use | as delimiter for sed to avoid issues with slashes in path
-          real_path=$(echo "$path" | sed "s|^/data|${HOME}|")
-          
-          if [[ -n "$id" && -n "$path" ]]; then
-              echo "Label:     ${label}"
-              echo "ID:        ${id}"
-              echo "Sync Path: ${path}"
-              echo "Real Path: ${real_path}"
-              echo "-------------------------"
-          fi
-      done
+  # 1. Linger Status
+  if loginctl show-user "${USER}" | grep -q "Linger=yes"; then
+    echo -e "Linger:    ${GREEN}Enabled${NC}"
   else
-      echo "Config file not found: ${config_file}"
+    echo -e "Linger:    ${RED}Disabled${NC} ${YELLOW}(Service stops on logout)${NC}"
+    echo -e "           Action: sudo loginctl enable-linger ${USER}"
+  fi
+
+  # 2. Systemd Service
+  if systemctl --user is-active --quiet "${SERVICE_NAME}"; then
+      echo -e "Service:   ${GREEN}Active${NC}"
+  else
+      echo -e "Service:   ${RED}Inactive${NC} (Run ./stkit.sh start)"
+  fi
+  
+  # 3. Directories
+  if [ -d "${CONFIG_DIR}" ]; then 
+      echo -e "Config:    ${GREEN}OK${NC}"
+  else 
+      echo -e "Config:    ${RED}MISSING${NC} (${CONFIG_DIR})"
+  fi
+  if [ -d "${STATE_DIR}" ]; then 
+      echo -e "State:     ${GREEN}OK${NC}"
+  else 
+      echo -e "State:     ${RED}MISSING${NC} (${STATE_DIR})"
+  fi
+  
+  # 4. Container
+  if podman ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+      # Get status and ports for concise display
+      local status=$(podman ps --filter "name=${CONTAINER_NAME}" --format "{{.Status}}")
+      echo -e "Container: ${GREEN}Running${NC} (${status})"
+      
+      # 5. Configured Folders (Only show if container is running/config exists)
+      echo -e "\n${BLUE}--- Synced Folders ---${NC}"
+      local config_file="${CONFIG_DIR}/config.xml"
+      if [ -f "${config_file}" ]; then
+          grep "<folder " "${config_file}" | while read -r line; do
+              id=$(echo "$line" | grep -o 'id="[^"]*"' | cut -d'"' -f2)
+              label=$(echo "$line" | grep -o 'label="[^"]*"' | cut -d'"' -f2)
+              path=$(echo "$line" | grep -o 'path="[^"]*"' | cut -d'"' -f2)
+              
+              if [[ -n "$id" && -n "$path" ]]; then
+                   real_path=$(echo "$path" | sed "s|^/data|${HOME}|")
+                   echo -e " ${GREEN}●${NC} ${YELLOW}${label}${NC}"
+                   echo -e "    ID:   ${id}"
+                   echo -e "    Path: ${real_path}"
+              fi
+          done
+      else
+          echo -e "${YELLOW}Config file not found.${NC}"
+      fi
+
+  else
+      echo -e "Container: ${RED}Not Running${NC}"
   fi
 }
 
