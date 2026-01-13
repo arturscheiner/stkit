@@ -104,10 +104,11 @@ EOF
 
 check_linger() {
   if loginctl show-user "${USER}" | grep -q "Linger=yes"; then
-    log "Linger already enabled for ${USER}."
+    log "Linger is enabled (OK)."
   else
     warn "Linger is NOT enabled."
-    warn "Run as root:"
+    warn "This means the service will STOP when you log out."
+    warn "To keep Syncthing running in the background, run:"
     warn "  sudo loginctl enable-linger ${USER}"
   fi
 }
@@ -255,6 +256,7 @@ cmd_check() {
   log "Checking status..."
   
   echo "--- Systemd Service ---"
+  check_linger
   systemctl --user status "${SERVICE_NAME}" --no-pager || echo "Service is not running."
   
   echo ""
