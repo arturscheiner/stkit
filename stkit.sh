@@ -89,7 +89,6 @@ ExecStart=/usr/bin/podman run \\
   -p ${SYNC_UDP_PORT}:22000/udp \\
   -p ${DISCOVERY_UDP_PORT}:21027/udp \\
   ${IMAGE} \\
-  syncthing \\
     --config=/config \\
     --data=/state \\
     --gui-address=0.0.0.0:8384
