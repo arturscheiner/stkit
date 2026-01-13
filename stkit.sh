@@ -279,26 +279,45 @@ cmd_check() {
   
   # 3. Directories
   if [ -d "${CONFIG_DIR}" ]; then 
-      echo -e "Config:    ${GREEN}OK${NC}"
+      echo -e "Config:    ${GREEN}OK${NC} (${CONFIG_DIR})"
   else 
       echo -e "Config:    ${RED}MISSING${NC} (${CONFIG_DIR})"
   fi
   if [ -d "${STATE_DIR}" ]; then 
-      echo -e "State:     ${GREEN}OK${NC}"
+      echo -e "State:     ${GREEN}OK${NC} (${STATE_DIR})"
   else 
       echo -e "State:     ${RED}MISSING${NC} (${STATE_DIR})"
   fi
   
-  # 4. Container
+  # 4. Connectivity Information
+  echo -e "\n${BLUE}--- Connectivity ---${NC}"
+  echo -e "GUI:       ${GREEN}http://localhost:${GUI_PORT}${NC}"
+  echo -e "Sync TCP:  ${YELLOW}${SYNC_TCP_PORT}${NC}"
+  echo -e "Sync UDP:  ${YELLOW}${SYNC_UDP_PORT}${NC}"
+  echo -e "Discovery: ${YELLOW}${DISCOVERY_UDP_PORT}${NC}"
+
+  # 5. GUI Settings & Container
+  local config_file="${CONFIG_DIR}/config.xml"
+  if [ -f "${config_file}" ]; then
+     echo -e "\n${BLUE}--- GUI Settings ---${NC}"
+     # Parse GUI config best effort
+     gui_line=$(grep "<gui " "$config_file" | head -n 1)
+     gui_enabled=$(echo "$gui_line" | grep -o 'enabled="[^"]*"' | cut -d'"' -f2)
+     gui_tls=$(echo "$gui_line" | grep -o 'tls="[^"]*"' | cut -d'"' -f2)
+     gui_user=$(grep "<user>" "$config_file" | head -n 1 | sed -e 's/^[ \t]*<user>//' -e 's/<\/user>.*//')
+     
+     echo -e "Enabled:   ${YELLOW}${gui_enabled:-Unknown}${NC}"
+     echo -e "TLS:       ${YELLOW}${gui_tls:-Unknown}${NC}"
+     echo -e "User:      ${YELLOW}${gui_user:-None}${NC}"
+  fi
+
   if podman ps --format "{{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
-      # Get status and ports for concise display
       local status=$(podman ps --filter "name=${CONTAINER_NAME}" --format "{{.Status}}")
-      echo -e "Container: ${GREEN}Running${NC} (${status})"
+      echo -e "\nContainer: ${GREEN}Running${NC} (${status})"
       
-      # 5. Configured Folders (Only show if container is running/config exists)
-      echo -e "\n${BLUE}--- Synced Folders ---${NC}"
-      local config_file="${CONFIG_DIR}/config.xml"
+      # 6. Synced Folders
       if [ -f "${config_file}" ]; then
+          echo -e "\n${BLUE}--- Synced Folders ---${NC}"
           grep "<folder " "${config_file}" | while read -r line; do
               id=$(echo "$line" | grep -o 'id="[^"]*"' | cut -d'"' -f2)
               label=$(echo "$line" | grep -o 'label="[^"]*"' | cut -d'"' -f2)
@@ -308,15 +327,13 @@ cmd_check() {
                    real_path=$(echo "$path" | sed "s|^/data|${HOME}|")
                    echo -e " ${GREEN}●${NC} ${YELLOW}${label}${NC}"
                    echo -e "    ID:   ${id}"
+                   # echo -e "    Container Path: ${path}" # Optional: hide internal path if confusing
                    echo -e "    Path: ${real_path}"
               fi
           done
-      else
-          echo -e "${YELLOW}Config file not found.${NC}"
       fi
-
   else
-      echo -e "Container: ${RED}Not Running${NC}"
+      echo -e "\nContainer: ${RED}Not Running${NC}"
   fi
 }
 
