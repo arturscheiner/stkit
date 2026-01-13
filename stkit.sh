@@ -161,6 +161,24 @@ cmd_update() {
   log "Update concluído."
 }
 
+cmd_stop() {
+  log "Parando serviço ${SERVICE_NAME}..."
+  systemctl --user stop "${SERVICE_NAME}"
+  
+  # Ensure container is stopped if running outside service or stuck
+  if podman ps -q --filter "name=${CONTAINER_NAME}" | grep -q .; then
+     log "Parando container ${CONTAINER_NAME} (cleanup)..."
+     podman stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  fi
+  
+  log "Stop concluído."
+}
+
+cmd_redeploy() {
+  log "Redeploy solicitado. Reiniciando todo o processo de instalação..."
+  cmd_install
+}
+
 ############################################
 # MAIN
 ############################################
@@ -170,6 +188,8 @@ usage() {
 Uso:
   $0 install   Instala Syncthing como serviço systemd --user
   $0 update    Atualiza a imagem e reinicia o serviço
+  $0 stop      Para o serviço e o container
+  $0 redeploy  Remove e recria o container (reinstala)
 
 Configurações:
   Ajuste as variáveis no topo do arquivo.
@@ -177,7 +197,9 @@ EOF
 }
 
 case "${1:-}" in
-  install) cmd_install ;;
-  update)  cmd_update  ;;
+  install)  cmd_install ;;
+  update)   cmd_update  ;;
+  stop)     cmd_stop    ;;
+  redeploy) cmd_redeploy ;;
   *)       usage; exit 1 ;;
 esac
