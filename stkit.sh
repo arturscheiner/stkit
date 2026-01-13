@@ -153,6 +153,21 @@ cmd_install() {
   systemctl --user daemon-reload
   systemctl --user enable --now "${SERVICE_NAME}"
   
+  # Wait for container to start
+  log "Aguardando inicialização..."
+  sleep 3
+  
+  # Check if container is actually running
+  if ! podman ps -q --filter "name=${CONTAINER_NAME}" | grep -q .; then
+      echo ""
+      err "FALHA: O container não iniciou corretamente."
+      log "Logs do container:"
+      podman logs "${CONTAINER_NAME}" 2>&1 | tail -n 20
+      echo ""
+      err "Verifique o status do serviço: systemctl --user status ${SERVICE_NAME}"
+      exit 1
+  fi
+  
   check_linger
   print_post_install_notes
 }
