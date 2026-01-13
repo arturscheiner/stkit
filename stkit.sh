@@ -62,7 +62,7 @@ start_container_once() {
     --restart "${RESTART_POLICY}" \
     --security-opt label=disable \
     -e HOME="${USER_HOME}" \
-    -v "${USER_HOME}:${USER_HOME}:Z" \
+    -v "${USER_HOME}:${USER_HOME}" \
     -p "${GUI_PORT}:${GUI_PORT}" \
     -p "${SYNC_TCP_PORT}:${SYNC_TCP_PORT}/tcp" \
     -p "${SYNC_UDP_PORT}:${SYNC_UDP_PORT}/udp" \
