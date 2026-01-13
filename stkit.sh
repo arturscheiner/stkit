@@ -280,11 +280,13 @@ cmd_check() {
           # We use | as delimiter for sed to avoid issues with slashes in path
           real_path=$(echo "$path" | sed "s|^/data|${HOME}|")
           
-          echo "Label:     ${label}"
-          echo "ID:        ${id}"
-          echo "Sync Path: ${path}"
-          echo "Real Path: ${real_path}"
-          echo "-------------------------"
+          if [[ -n "$id" && -n "$path" ]]; then
+              echo "Label:     ${label}"
+              echo "ID:        ${id}"
+              echo "Sync Path: ${path}"
+              echo "Real Path: ${real_path}"
+              echo "-------------------------"
+          fi
       done
   else
       echo "Config file not found: ${config_file}"
