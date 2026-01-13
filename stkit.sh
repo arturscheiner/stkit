@@ -61,7 +61,7 @@ start_container_once() {
     ${USERNS_FLAG} \
     --restart "${RESTART_POLICY}" \
     --security-opt label=disable \
-    -e STDATADIR=/var/syncthing \
+    -e HOME=/var/syncthing \
     -v "${DATA_DIR}:/var/syncthing" \
     -p "${GUI_PORT}:${GUI_PORT}" \
     -p "${SYNC_TCP_PORT}:${SYNC_TCP_PORT}/tcp" \
@@ -137,6 +137,16 @@ cmd_install() {
   remove_service_if_exists
   remove_container_if_exists
   start_container_once
+  
+  # Verify if container is running
+  sleep 2
+  if ! podman ps -q --filter "name=${CONTAINER_NAME}" | grep -q .; then
+     err "Container falhou ao iniciar!"
+     log "Logs do container:"
+     podman logs "${CONTAINER_NAME}"
+     exit 1
+  fi
+
   generate_systemd_unit
   enable_and_start_service
   check_linger
